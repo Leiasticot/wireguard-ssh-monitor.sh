@@ -24,6 +24,7 @@ MSMTP_CONFIG="/home/youruser/.msmtprc"        # Path to your msmtp config file
 
 HOSTNAME="$(hostname)"
 PUBLIC_IP=$(curl -s ifconfig.me || curl -s icanhazip.com)
+ALERT_FLAG_FILE="/tmp/wg_down_alert_sent"
 
 # Function to send email using msmtp
 send_mail() {
@@ -53,8 +54,12 @@ fi
 if (( age > HANDSHAKE_THRESHOLD )); then
     echo "[WARN] WireGuard tunnel appears inactive..."
 
-    send_mail "⚠️ [VPN Monitor] VPN Down on $HOSTNAME" \
-        "🕒 Date: $(date)\n📶 Last handshake: $age seconds ago\n🌍 Public IP: $PUBLIC_IP\n\nAttempting auto-restart..."
+    # Only alert if we haven't already
+    if [[ ! -f "$ALERT_FLAG_FILE" ]]; then
+        send_mail "⚠️ [VPN Monitor] VPN Down on $HOSTNAME" \
+            "🕒 Date: $(date)\n📶 Last handshake: $age seconds ago\n🌍 Public IP: $PUBLIC_IP\n\nAttempting auto-restart..."
+        touch "$ALERT_FLAG_FILE"
+    fi
 
     # Restart WireGuard
     sudo systemctl restart wg-quick@$WG_INTERFACE
@@ -78,6 +83,7 @@ if (( age > HANDSHAKE_THRESHOLD )); then
         echo "[OK] VPN recovered automatically ✅"
         send_mail "✅ [VPN Monitor] VPN Restored on $HOSTNAME" \
             "🎉 WireGuard successfully recovered.\n⏱️ Last handshake: $new_age seconds ago\n🕒 Date: $(date)"
+        rm -f "$ALERT_FLAG_FILE"
     fi
 else
     echo "[OK] VPN is active — checking for any leftover SSH rule..."
@@ -88,4 +94,7 @@ else
         send_mail "✅ [VPN Monitor] SSH Rule Removed - VPN OK on $HOSTNAME" \
             "🔐 VPN is active again.\nTemporary SSH rule on port $SSH_PORT has been removed.\n🕒 Date: $(date)"
     fi
+
+    # If VPN is fine now, clear alert flag just in case
+    rm -f "$ALERT_FLAG_FILE"
 fi
